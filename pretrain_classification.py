@@ -34,7 +34,7 @@ parser.add_argument("--multigpu", action="store_true", help="enable multi-GPU tr
 parser.add_argument(
     "--runname",
     type=str,
-    default="nanotabpfn",
+    default="nanotabpfn_classification",
     help="name of the training run, will be used to store the training checkpoints and for WandB logging",
 )
 
@@ -124,3 +124,5 @@ trained_model, loss = train(
     multi_gpu=args.multigpu,
     run_name=args.runname,
 )
+
+torch.save(trained_model.to("cpu").state_dict(), f"{args.runname}_weights.pth")
