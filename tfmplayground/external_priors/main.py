@@ -7,9 +7,9 @@ import numpy as np
 import torch
 
 from .base import dump_prior_to_h5
-from .tabicl import TabICLPriorDataLoader
-from .tabpfn import TabPFNPriorDataLoader, build_tabpfn_prior
-from .ticl import TICLPriorDataLoader, build_ticl_prior
+from .tabicl_loader import TabICLPriorDataLoader
+from .tabpfn_loader import TabPFNPriorDataLoader, build_tabpfn_prior
+from .ticl_loader import TICLPriorDataLoader, build_ticl_prior
 
 
 def main():

@@ -1,13 +1,93 @@
+import torch
+from scipy.integrate import solve_ivp
 from tabicl.prior._dataset import DisablePrinting, Prior
 from torch import Tensor
+from torch.nested import nested_tensor
 from torch.utils.data import IterableDataset
+
+from mouse_utils import ParameterSampler
 
 
 class MousePrior(Prior):
     """Class for generating synthetic tabular datasets on-the-fly."""
     
-    def __init__(self):
-        pass
+    def __init__(
+        self,
+        max_interventions: int = 2,
+    ):
+        self.parameter_sampler = ParameterSampler(
+            a_mu=0.0,
+            a_sigma=1.0,
+            b_mu=24.0,
+            b_sigma=3.0,
+            noise_sigma=0.2,
+        )
+        self.parameter_sampler.set_slopes()
+
+        self.max_interventions = max_interventions
+    
+    def get_batch(self, batch_size: int):
+        batch_X = []
+        batch_y = []
+        seq_lens = []
+        train_sizes = []
+        for _ in range(batch_size):
+            seq_len = torch.randint(50, 200, (1,)).item()
+            train_size = torch.randint(int(seq_len * 0.1), int(seq_len * 0.9), (1,)).item()
+            X, y = self.generate_dataset(seq_len=seq_len)
+
+            batch_X.append(X)
+            batch_y.append(y)
+            seq_lens.append(seq_len)
+            train_sizes.append(train_size)
+        
+        # Nested tensor
+        batch_X = nested_tensor(batch_X, layout=torch.jagged)
+        batch_y = nested_tensor(batch_y, layout=torch.jagged)
+        seq_lens = torch.tensor(seq_lens)
+        train_sizes = torch.tensor(train_sizes)
+        d = torch.tensor([2] * batch_size)  # always 2 features in this prior
+        
+        return batch_X, batch_y, d, seq_lens, train_sizes
+    
+    def generate_dataset(
+        self,
+        seq_len: int,
+    ):
+        interventions = torch.zeros(seq_len, dtype=torch.int8)
+        num_interventions = torch.randint(0, self.max_interventions + 1, (1,)).item()
+        interventions[torch.randperm(seq_len)[:num_interventions]] = 1
+        
+        intercept = self.parameter_sampler.sample_intercept().item()
+        self.parameter_sampler.set_slopes(seq_len=num_interventions + 1)
+        
+        print(f"num interventions: {num_interventions}, num slopes: {len(self.parameter_sampler.slopes)}")
+        print(f"interventions: {interventions}")
+        
+        sol = solve_ivp(
+            fun=self.linear_ode,
+            t_span=(1, seq_len),
+            t_eval=torch.arange(1, seq_len + 1),
+            y0=[intercept],
+            args=(self.parameter_sampler.slopes, interventions),
+        )
+
+        print(sol.t)
+        print(sol.y[0])
+        
+        X = torch.stack([torch.tensor(sol.t, dtype=torch.float32), interventions.float()], dim=1)
+        
+        return X, torch.tensor(sol.y[0], dtype=torch.float32)
+
+    @staticmethod
+    def linear_ode(
+        t,
+        y,
+        slopes,
+        interventions,
+    ):
+        idx = interventions[:int(t)].sum().item()
+        return slopes[idx]
 
 
 class MousePriorDataset(IterableDataset):
@@ -183,3 +263,14 @@ class MousePriorDataset(IterableDataset):
             f"  device: {self.device}\n"
             f")"
         )
+
+
+if __name__ == "__main__":
+    dataset = MousePriorDataset(batch_size=4)
+    X, y, d, seq_lens, train_sizes = dataset.get_batch(4)
+    for i in range(4):
+        print(f"X[{i}]:", X[i].shape)
+        print(f"y[{i}]:", y[i].shape)
+    print(f"d: {d}")
+    print(f"seq_lens: {seq_lens}")
+    print(f"train_sizes: {train_sizes}")
